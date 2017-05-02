@@ -1,0 +1,121 @@
+---
+# Copyright 2016, Rackspace US, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+#- name: Add galera apt-keys
+#  apt_key:
+#    id: "{{ item.hash_id }}"
+#    keyserver: "{{ item.keyserver | default(omit) }}"
+#    data: "{{ item.data | default(omit) }}"
+#    url: "{{ item.url | default(omit) }}"
+#    state: "present"
+#  register: add_keys
+#  until: add_keys|success
+#  failed_when: false
+#  retries: 5
+#  delay: 2
+#  with_items: "{{ galera_gpg_keys }}"
+#  tags:
+#    - galera-apt-keys
+#
+#- name: Add galera apt-keys using fallback keyserver
+#  apt_key:
+#    id: "{{ item.hash_id }}"
+#    keyserver: "{{ item.fallback_keyserver | default(omit) }}"
+#    url: "{{ item.fallback_url | default(omit) }}"
+#    state: "present"
+#  register: add_keys_fallback
+#  until: add_keys_fallback|success
+#  retries: 5
+#  delay: 2
+#  with_items: "{{ galera_gpg_keys }}"
+#  when: add_keys|failed and (item.fallback_keyserver is defined or item.fallback_url is defined)
+#  tags:
+#    - galera-apt-keys
+#
+#- name: Remove old repos
+#  lineinfile:
+#    dest: "/etc/apt/sources.list.d/{{ item.name }}.list"
+#    regexp: "^((?!{{ item.repo }}).*)$"
+#    state: absent
+#  with_items:
+#    - { name: "MariaDB", repo: "{{ galera_repo.repo }}" }
+#    - { name: "Percona", repo: "{{ galera_percona_xtrabackup_repo.repo }}" }
+#  tags:
+#    - galera-client-repos
+#    - percona-repos
+#
+#- name: Add galera repo
+#  apt_repository:
+#    repo: "{{ galera_repo.repo }}"
+#    filename: "{{ galera_repo.filename | default(omit) }}"
+#    state: "{{ galera_repo.state }}"
+#  register: add_repos
+#  until: add_repos|success
+#  retries: 5
+#  delay: 2
+#  tags:
+#    - galera-repos
+#
+#- name: Add percona repo
+#  apt_repository:
+#    repo: "{{ galera_percona_xtrabackup_repo.repo }}"
+#    filename: "{{ galera_percona_xtrabackup_repo.filename | default(omit) }}"
+#    state: "{{ (use_percona_upstream | bool) | ternary('present','absent') }}"
+#  register: add_repos
+#  until: add_repos|success
+#  retries: 5
+#  delay: 2
+#  tags:
+#    - percona-repos
+
+- name: Preseed galera password(s)
+  debconf:
+    name: "{{ item.name }}"
+    question: "{{ item.question }}"
+    value: "{{ item.value }}"
+    vtype: "{{ item.vtype }}"
+  with_items: "{{ galera_debconf_items }}"
+  tags:
+    - galera-debconf
+
+- name: Prevent galera from starting on install
+  copy:
+    src: "policy-rc.d"
+    dest: "/usr/sbin/policy-rc.d"
+    mode: "0755"
+    backup: yes
+
+- name: Install galera_server role remote packages (apt)
+  apt:
+    name: "{{ item }}"
+    state: "{{ galera_server_package_state }}"
+    update_cache: yes
+    cache_valid_time: "{{ (add_repos | changed) | ternary('0', cache_timeout) }}"
+  with_items:
+    - "{{ galera_packages_list | selectattr('enabled') | rejectattr('local_pkg') | sum(attribute='packages', start=[]) }}"
+
+- name: Install galera_server role local packages (apt)
+  apt:
+    deb: "{{ item }}"
+    force: yes
+  with_items:
+    - "{{ galera_packages_list | selectattr('enabled') | selectattr('local_pkg') | sum(attribute='packages', start=[]) }}"
+
+- name: Remove policy-rc
+  file:
+    path: "/usr/sbin/policy-rc.d"
+    state: absent
+  tags:
+    - galera_server-config

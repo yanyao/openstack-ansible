@@ -1,0 +1,109 @@
+---
+# Copyright 2016, Rackspace US, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+#- name: Ensure host can talk to HTTPS apt repos
+#  apt:
+#    pkg: "apt-transport-https"
+#    state: "{{ galera_client_package_state }}"
+#    update_cache: yes
+#    cache_valid_time: "{{ cache_timeout }}"
+#  tags:
+#    - galera-client-apt-packages
+#
+#- name: Add galera apt-keys
+#  apt_key:
+#    id: "{{ item.hash_id }}"
+#    keyserver: "{{ item.keyserver | default(omit) }}"
+#    data: "{{ item.data | default(omit) }}"
+#    url: "{{ item.url | default(omit) }}"
+#    state: "present"
+#  with_items: "{{ galera_client_gpg_keys }}"
+#  register: add_keys
+#  until: add_keys|success
+#  retries: 5
+#  delay: 2
+#  failed_when: false
+#  tags:
+#    - galera-client-apt-keys
+#
+#- name: Add galera apt-keys using fallback source
+#  apt_key:
+#    id: "{{ item.hash_id }}"
+#    keyserver: "{{ item.fallback_keyserver | default(omit) }}"
+#    url: "{{ item.fallback_url | default(omit) }}"
+#    state: "present"
+#  register: add_keys_fallback
+#  until: add_keys_fallback | success
+#  retries: 5
+#  delay: 2
+#  with_items: "{{ galera_client_gpg_keys }}"
+#  when: add_keys|failed and (item.fallback_keyserver is defined or item.fallback_url is defined)
+#  tags:
+#    - galera-client-apt-keys
+#
+## TODO: Remove the following two tasks in Pike
+## They're only required during upgrades transitioning to a
+## statically named apt sources file.
+#- name: Find old sources
+#  find:
+#    path: "/etc/apt/sources.list.d/"
+#    patterns: "^(?!{{ mariadb_repo_filename }})(.+)|(.+)(?<!{{ mariadb_repo_filename }})\\.list$"
+#    contains: "^.*maria.*$"
+#    use_regex: true
+#  register: old_sources
+#  tags:
+#    - galera-client-repos
+#
+#- name: Remove old sources
+#  file:
+#    path: "{{ item.path }}"
+#    state: absent
+#  with_items: "{{ old_sources.files | default([]) }}"
+#  tags:
+#    - galera-client-repos
+#
+#- name: Remove old galera repo
+#  lineinfile:
+#    dest: /etc/apt/sources.list.d/{{ mariadb_repo_filename }}.list
+#    regexp: "^((?!{{ galera_client_repo }}).*)$"
+#    state: absent
+#  tags:
+#    - galera-client-repos
+#
+#- name: Add galera repo
+#  apt_repository:
+#    repo: "{{ galera_client_repo }}"
+#    filename: "{{ mariadb_repo_filename }}"
+#    state: present
+#    update_cache: yes
+#  register: add_repo
+#  until: add_repo | success
+#  retries: 5
+#  delay: 2
+#  tags:
+#    - galera-client-repos
+
+- name: Install galera packages
+  apt:
+    pkg: "{{ item }}"
+    state: "{{ galera_client_package_state }}"
+  register: install_packages
+  until: install_packages | success
+  retries: 5
+  delay: 2
+  with_items: "{{ galera_client_distro_packages }}"
+  when: "{{ item | length > 0 }}"
+  tags:
+    - galera-client-apt-packages
