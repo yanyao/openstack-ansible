@@ -102,7 +102,7 @@
     name: "{{ item }}"
     state: "{{ galera_server_package_state }}"
     update_cache: yes
-    cache_valid_time: "{{ (add_repos | changed) | ternary('0', cache_timeout) }}"
+#    cache_valid_time: "{{ (add_repos | changed) | ternary('0', cache_timeout) }}"
   with_items:
     - "{{ galera_packages_list | selectattr('enabled') | rejectattr('local_pkg') | sum(attribute='packages', start=[]) }}"
 
