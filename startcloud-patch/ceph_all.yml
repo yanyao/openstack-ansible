@@ -31,7 +31,7 @@
 #  tags:
 #    - ceph-install
 
-- include: "ceph_install_{{ ansible_pkg_mgr }}.yml"
+- include: ceph_install.yml
   tags:
     - ceph-install
 
