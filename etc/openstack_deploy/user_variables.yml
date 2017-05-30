@@ -118,6 +118,7 @@ debug: false
 # placed both on the hosts and inside the containers.
 
 ## Example environment variable setup:
+## (1) This sets up a permanent environment, used during and after deployment:
 # proxy_env_url: http://username:pa$$w0rd@10.10.10.9:9000/
 # no_proxy_env: "localhost,127.0.0.1,{{ internal_lb_vip_address }},{{ external_lb_vip_address }},{% for host in groups['all_containers'] %}{{ hostvars[host]['container_address'] }}{% if not loop.last %},{% endif %}{% endfor %}"
 # global_environment_variables:
@@ -127,6 +128,12 @@ debug: false
 #   http_proxy: "{{ proxy_env_url }}"
 #   https_proxy: "{{ proxy_env_url }}"
 #   no_proxy: "{{ no_proxy_env }}"
+#
+## (2) This is applied only during deployment, nothing is left after deployment is complete:
+# deployment_environment_variables:
+#   http_proxy: http://username:pa$$w0rd@10.10.10.9:9000/
+#   https_proxy: http://username:pa$$w0rd@10.10.10.9:9000/
+#   no_proxy: "localhost,127.0.0.1,{{ internal_lb_vip_address }},{{ external_lb_vip_address }}"
 
 
 ## SSH connection wait time
@@ -135,7 +142,11 @@ debug: false
 #ssh_delay: 5
 
 
-## HAProxy
+## HAProxy and keepalived
+# All the previous variables are used inside a var, in the group vars.
+# You can override the current keepalived definition (see
+# group_vars/all/keepalived.yml) in your user space if necessary.
+#
 # Uncomment this to disable keepalived installation (cf. documentation)
 # haproxy_use_keepalived: False
 #
@@ -160,7 +171,3 @@ debug: false
 
 # Keepalived default IP address used to check its alive status (IPv4 only)
 # keepalived_ping_address: "193.0.14.129"
-
-# All the previous variables are used in a var file, fed to the keepalived role.
-# To use another file to feed the role, override the following var:
-# haproxy_keepalived_vars_file: 'vars/configs/keepalived_haproxy.yml'

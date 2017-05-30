@@ -108,8 +108,10 @@ for repo in $(grep 'git_repo\:' ${SERVICE_FILE}); do
           popd > /dev/null
 
           # Update the policy files
-          find ${os_repo_tmp_path}/etc -name "policy.json" -exec \
-            cp {} "${osa_repo_tmp_path}/templates/policy.json.j2" \;
+          if [ "${repo_name}" != "keystone" ] && [ "${repo_name}" != "gnocchi" ] && [ "${repo_name}" != "ceilometer" ]; then
+            find ${os_repo_tmp_path}/etc -name "policy.json" -exec \
+              cp {} "${osa_repo_tmp_path}/templates/policy.json.j2" \;
+          fi
 
           # Tweak the paste files for any hmac key entries
           find ${os_repo_tmp_path}/etc -name "*[_-]paste.ini" -exec \
@@ -118,18 +120,14 @@ for repo in $(grep 'git_repo\:' ${SERVICE_FILE}); do
           # Tweak the barbican paste file to support keystone auth
           if [ "${repo_name}" = "barbican" ]; then
             find ${os_repo_tmp_path}/etc -name "*[_-]paste.ini" -exec \
-              sed -i.bak sed 's|\/v1\: barbican-api-keystone|\/v1\: {{ (barbican_keystone_auth \| bool) \| ternary('barbican-api-keystone', 'barbican_api') }}|'{} \;
-          fi
-
-          # Tweak the gnocchi paste file to support keystone auth
-          if [ "${repo_name}" = "gnocchi" ]; then
-            find ${os_repo_tmp_path}/etc -name "*[_-]paste.ini" -exec \
-              sed -i.bak "s|pipeline = gnocchi+noauth|pipeline = {{ (gnocchi_keystone_auth \| bool) \| ternary('gnocchi+auth', 'gnocchi+noauth') }}|" {} \;
+              sed -i.bak 's|\/v1\: barbican-api-keystone|\/v1\: {{ (barbican_keystone_auth \| bool) \| ternary('barbican-api-keystone', 'barbican_api') }}|'{} \;
           fi
 
           # Update the paste files
-          find ${os_repo_tmp_path}/etc -name "*[_-]paste.ini" -exec \
-            bash -c "name=\"{}\"; cp \${name} \"${osa_repo_tmp_path}/templates/\$(basename \${name}).j2\"" \;
+          if [ "${repo_name}" != "keystone" ] && [ "${repo_name}" != "gnocchi" ] && [ "${repo_name}" != "ceilometer" ]; then
+            find ${os_repo_tmp_path}/etc -name "*[_-]paste.ini" -exec \
+              bash -c "name=\"{}\"; cp \${name} \"${osa_repo_tmp_path}/templates/\$(basename \${name}).j2\"" \;
+          fi
 
           # Tweak the rootwrap conf filters_path (for neutron only)
           if [ "${repo_name}" = "neutron" ]; then
@@ -148,12 +146,6 @@ for repo in $(grep 'git_repo\:' ${SERVICE_FILE}); do
           # Update the rootwrap filters
           find ${os_repo_tmp_path}/etc -name "*.filters" -exec \
             bash -c "name=\"{}\"; cp \${name} \"${osa_repo_tmp_path}/files/rootwrap.d/\$(basename \${name})\"" \;
-
-          # Update the yaml files for Ceilometer
-          if [ "${repo_name}" = "ceilometer" ]; then
-            find ${os_repo_tmp_path}/etc -name "*.yaml" -exec \
-              bash -c "name=\"{}\"; cp \${name} \"${osa_repo_tmp_path}/templates/\$(basename \${name}).j2\"" \;
-          fi
 
           # Update the yaml files for Heat
           if [ "${repo_name}" = "heat" ]; then
@@ -205,7 +197,7 @@ sed -i.bak "s|^PIP_INSTALL_OPTIONS=.*|PIP_INSTALL_OPTIONS=\$\{PIP_INSTALL_OPTION
 
 for pin in ${PIP_CURRENT_OPTIONS}; do
   sed -i.bak "s|^$(echo ${pin} | cut -f1 -d=).*|${pin}|" global-requirement-pins.txt
-  sed -i.bak "s|^  - $(echo ${pin} | cut -f1 -d=).*|  - ${pin}|" playbooks/inventory/group_vars/all.yml
+  sed -i.bak "s|^  - $(echo ${pin} | cut -f1 -d=).*|  - ${pin}|" playbooks/inventory/group_vars/all/pip.yml
 done
 
 echo "Updated pip install options/pins"
@@ -271,13 +263,13 @@ else
   echo "Skipping the ansible-role-requirements.yml update as we're working on the master branch"
 fi
 
-# Update the release version in playbooks/inventory/group_vars/all.yml
+# Update the release version in playbooks/inventory/group_vars/all/all.yml
 # We don't want to be doing this for the master branch and we only want
 # to do it once, so we key off of a specific repo source file name.
 if [[ "${OSA_BRANCH}" != "master" ]] && [[ "${SERVICE_FILE}" == "playbooks/defaults/repo_packages/openstack_services.yml" ]]; then
 
   echo "Updating the release version..."
-  currentversion=$(awk '/openstack_release:/ {print $2}' playbooks/inventory/group_vars/all.yml)
+  currentversion=$(awk '/openstack_release:/ {print $2}' playbooks/inventory/group_vars/all/all.yml)
 
   # Extract the required version info
   major_version=$( echo ${currentversion} | cut -d. -f1 )
@@ -287,7 +279,7 @@ if [[ "${OSA_BRANCH}" != "master" ]] && [[ "${SERVICE_FILE}" == "playbooks/defau
   # increment the patch version
   patch_version=$(( patch_version + 1 ))
 
-  sed -i .bak "s/${currentversion}/${major_version}.${minor_version}.${patch_version}/" playbooks/inventory/group_vars/all.yml
+  sed -i .bak "s/${currentversion}/${major_version}.${minor_version}.${patch_version}/" playbooks/inventory/group_vars/all/all.yml
 else
   echo "Skipping the release version update as we're working on the master branch"
 fi
