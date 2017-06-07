@@ -127,13 +127,17 @@ iptables -P FORWARD ACCEPT
 iptables -P OUTPUT ACCEPT
 
 # Bootstrap an AIO
+unset ANSIBLE_VARS_PLUGINS
+unset HOST_VARS_PATH
+unset GROUP_VARS_PATH
+
 pushd "$(dirname "${0}")/../tests"
   if [ -z "${BOOTSTRAP_OPTS}" ]; then
-    ansible-playbook bootstrap-aio.yml \
+    /opt/ansible-runtime/bin/ansible-playbook bootstrap-aio.yml \
                      -i test-inventory.ini \
                      ${ANSIBLE_PARAMETERS}
   else
-    ansible-playbook bootstrap-aio.yml \
+    /opt/ansible-runtime/bin/ansible-playbook bootstrap-aio.yml \
                      -i test-inventory.ini \
                      -e "${BOOTSTRAP_OPTS}" \
                      ${ANSIBLE_PARAMETERS}
@@ -178,6 +182,12 @@ if [[ "${ACTION}" == "upgrade" ]]; then
     # requirements to be installed.
     unset ANSIBLE_PACKAGE
     unset UPPER_CONSTRAINTS_FILE
+
+    # Unset environment variables used by the override_folder
+    # plugin to set paths for group and host vars since the
+    # default locations have changed between Ocata and Pike.
+    unset GROUP_VARS_PATH
+    unset HOST_VARS_PATH
 
     # To execute the upgrade script we need to provide
     # an affirmative response to the warning that the
