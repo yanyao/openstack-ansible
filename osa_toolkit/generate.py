@@ -261,7 +261,7 @@ def _append_to_host_groups(inventory, container_type, assignment, host_type,
 
     iph = inventory[physical_group_type]['hosts']
     iah = inventory[assignment]['hosts']
-    for hname, hdata in inventory['_meta']['hostvars'].iteritems():
+    for hname, hdata in inventory['_meta']['hostvars'].items():
         is_metal = False
         properties = hdata.get('properties')
         if properties:
@@ -413,7 +413,7 @@ def user_defined_setup(config, inventory):
     :param inventory: ``dict``  Living dictionary of inventory
     """
     hvs = inventory['_meta']['hostvars']
-    for key, value in config.iteritems():
+    for key, value in config.items():
         if key.endswith('hosts'):
             if key not in inventory:
                 logger.debug("Key %s was added to inventory", key)
@@ -423,7 +423,7 @@ def user_defined_setup(config, inventory):
                 logger.debug("Key %s had no value", key)
                 return
 
-            for _key, _value in value.iteritems():
+            for _key, _value in value.items():
                 if _key not in hvs:
                     hvs[_key] = {}
 
@@ -460,10 +460,10 @@ def skel_setup(environment, inventory):
     :param environment: ``dict`` Known environment information
     :param inventory: ``dict``  Living dictionary of inventory
     """
-    for key, value in environment.iteritems():
+    for key, value in environment.items():
         if key == 'version':
             continue
-        for _key, _value in value.iteritems():
+        for _key, _value in value.items():
             if _key not in inventory:
                 logger.debug("Key %s added to inventory", _key)
                 inventory[_key] = {}
@@ -496,7 +496,7 @@ def skel_load(skeleton, inventory):
         memberships for the inventory.
     :param inventory: ``dict``  Living dictionary of inventory
     """
-    for key, value in skeleton.iteritems():
+    for key, value in skeleton.items():
         _parse_belongs_to(
             key,
             belongs_to=value['belongs_to'],
@@ -670,7 +670,7 @@ def container_skel_load(container_skel, inventory, config):
     """
     logger.debug("Loading container skeleton")
 
-    for key, value in container_skel.iteritems():
+    for key, value in container_skel.items():
         contains_in = value.get('contains', False)
         belongs_to_in = value.get('belongs_to', False)
         if contains_in or belongs_to_in:
@@ -829,14 +829,22 @@ def _parse_global_variables(user_cidr, inventory, user_defined_config):
             )
             logger.debug("Applied global_overrides")
 
-            kept_vars = user_defined_config['global_overrides'].keys()
+            # NOTE (palendae): wrapped in a list to support python3,
+            # which uses `dict_keys` objects that can't be appended
+            kept_vars = list(user_defined_config['global_overrides'].keys())
             kept_vars.append('container_cidr')
 
             # Remove global overrides that were deleted from inventory, too
+            # We use the to_delete list due to Python 3 disallowing dict
+            # size mutation during iteration
+            to_delete = []
             for key in inventory['all']['vars'].keys():
                 if key not in kept_vars:
-                    logger.debug("Deleting key %s from inventory", key)
-                    del inventory['all']['vars'][key]
+                    to_delete.append(key)
+
+            for key in to_delete:
+                logger.debug("Deleting key %s from inventory", key)
+                del inventory['all']['vars'][key]
 
 
 def _check_same_ip_to_multiple_host(config):
@@ -846,9 +854,9 @@ def _check_same_ip_to_multiple_host(config):
     """
 
     ips_to_hostnames_mapping = dict()
-    for key, value in config.iteritems():
+    for key, value in config.items():
         if key.endswith('hosts'):
-            for _key, _value in value.iteritems():
+            for _key, _value in value.items():
                 hostname = _key
                 ip = _value['ip']
                 if not (ip in ips_to_hostnames_mapping):
@@ -931,7 +939,7 @@ def _check_config_settings(cidr_networks, config, container_skel):
 
     # search for any container that doesn't have is_metal flag set to true
     is_provider_networks_needed = False
-    for key, value in container_skel.iteritems():
+    for key, value in container_skel.items():
         properties = value.get('properties', {})
         is_metal = properties.get('is_metal', False)
         if not is_metal:
@@ -1010,9 +1018,9 @@ def _collect_hostnames(inventory):
 
     # Generate a list of all hosts and their used IP addresses
     hostnames_ips = {}
-    for _host, _vars in inventory['_meta']['hostvars'].iteritems():
+    for _host, _vars in inventory['_meta']['hostvars'].items():
         host_hash = hostnames_ips[_host] = {}
-        for _key, _value in _vars.iteritems():
+        for _key, _value in _vars.items():
             if _key.endswith('address') or _key == 'ansible_host':
                 host_hash[_key] = _value
 

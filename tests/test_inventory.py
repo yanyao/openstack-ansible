@@ -16,7 +16,10 @@ import json
 import mock
 import os
 from os import path
-import Queue
+try:
+    import Queue
+except ImportError:
+    import queue as Queue
 import sys
 import unittest
 import warnings
@@ -567,7 +570,7 @@ class TestConfigCheckBase(unittest.TestCase):
         self.config_changed = True
         # Save new user_config_file
         with open(USER_CONFIG_FILE, 'wb') as f:
-            f.write(yaml.dump(self.user_defined_config))
+            f.write(yaml.dump(self.user_defined_config).encode('ascii'))
 
     def restore_config(self):
         # get back our initial user config file
@@ -985,9 +988,14 @@ class TestOverridingEnvVars(OverridingEnvBase):
         # a partial override file
 
         vol = self.cinder_config['container_skel']['cinder_volumes_container']
+        keys = vol.keys()
+        to_delete = []
         for key in vol.keys():
             if not key == 'properties':
-                del vol[key]
+                to_delete.append(key)
+
+        for key in to_delete:
+            del vol[key]
 
         self.write_override_env()
 

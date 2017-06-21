@@ -183,16 +183,42 @@ if [[ "${ACTION}" == "upgrade" ]]; then
     unset ANSIBLE_PACKAGE
     unset UPPER_CONSTRAINTS_FILE
 
-    # Unset environment variables used by the override_folder
-    # plugin to set paths for group and host vars since the
-    # default locations have changed between Ocata and Pike.
-    unset GROUP_VARS_PATH
-    unset HOST_VARS_PATH
+    # Kick off the data plane tester
+    $(dirname "${0}")/../tests/data-plane-test.sh &
+
+    # Fetch script to execute API availability tests, then
+    # background them while the upgrade runs.
+    get_bowling_ball_tests
+    start_bowling_ball_tests
 
     # To execute the upgrade script we need to provide
     # an affirmative response to the warning that the
     # upgrade is irreversable.
     echo 'YES' | bash "$(dirname "${0}")/run-upgrade.sh"
+
+    # Terminate the API availability tests
+    kill_bowling_ball_tests
+
+    # Terminate the data plane tester
+    rm -f /var/run/data-plane-test.socket
+
+    # Wait 10s for the tests to complete
+    sleep 10
+
+    # Output the API availability test results
+    print_bowling_ball_results
+
+    # Check for any data plane failures, and fail if there are
+    if ! egrep -q "^FAIL: 0$" /var/log/data-plane-test.log; then
+        echo -e "\n\nFAIL: The L3 data plane check failed!\n\n"
+        exit 1
+    fi
+
+    # Check for any disk access failures, and fail if there are
+    if ! egrep -q "^FAIL: 0$" /var/log/disk-access-test.log; then
+        echo -e "\n\nFAIL: The disk access data plane check failed!\n\n"
+        exit 1
+    fi
 
 fi
 
