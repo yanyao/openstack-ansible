@@ -1,10 +1,16 @@
 ---
 cidr_networks:
+  dbaas: 172.29.232.0/22
+  lbaas: 172.29.252.0/22
   container: 172.29.236.0/22
   tunnel: 172.29.240.0/22
   storage: 172.29.244.0/22
 
 used_ips:
+  - "172.29.232.1,172.29.232.50"
+  - "172.29.232.100"
+  - "172.29.252.1,172.29.252.50"
+  - "172.29.252.100"
   - "172.29.236.1,172.29.236.50"
   - "172.29.236.100"
   - "172.29.240.1,172.29.240.50"
@@ -43,6 +49,30 @@ global_overrides:
         net_name: "vxlan"
         group_binds:
           - neutron_linuxbridge_agent
+    - network:
+        container_bridge: "br-dbaas"
+        container_type: "veth"
+        container_interface: "eth13"
+        host_bind_override: "eth13"
+        ip_from_q: "dbaas"
+        type: "flat"
+        net_name: "flat-db"
+        group_binds:
+          - neutron_linuxbridge_agent
+          - rabbitmq
+    - network:
+        container_bridge: "br-lbaas"
+        container_type: "veth"
+        container_interface: "eth14"
+        host_bind_override: "eth14"
+        ip_from_q: "lbaas"
+        type: "flat"
+        net_name: "lbaas"
+        group_binds:
+          - neutron_linuxbridge_agent
+          - octavia-worker
+          - octavia-housekeeping
+          - octavia-health-manager
     - network:
         container_bridge: "br-vlan"
         container_type: "veth"

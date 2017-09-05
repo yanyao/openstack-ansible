@@ -19,18 +19,21 @@
 #
 """Returns data about containers and groups in tabular formats."""
 
+import os
+import sys
+
 # NOTE(nrb/palendae): The contents of this file were moved
 # to manage.py in order to facilitate importing of the python code
 
 # This file remains for backwards compatibility
-import os
-import sys
 
-cwd = os.path.abspath(os.path.dirname(__file__))
-import_path = os.path.join(cwd, '..', 'osa_toolkit')
-sys.path.append(import_path)
-
-import manage
+try:
+    from osa_toolkit import manage
+except ImportError:
+    current_path = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
+    lib_path = os.path.join(current_path, '..')
+    sys.path.append(lib_path)
+    from osa_toolkit import manage
 
 if __name__ == "__main__":
     manage.main()

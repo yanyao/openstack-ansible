@@ -13,6 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- include: common-playbooks/unbound-clients.yml
+  vars:
+    unbound_group: "molteniron_all"
+  when:
+    - resolvconf_enabled | bool
+
 - name: Installation and setup of molteniron
   hosts: molteniron_all
   gather_facts: "{{ gather_facts | default(True) }}"
@@ -21,7 +27,7 @@
     - include: common-tasks/os-lxc-container-setup.yml
       vars:
         extra_container_config_no_restart:
-          - "lxc.start.order=79"
+          - "lxc.start.order=39"
     - include: common-tasks/os-log-dir-setup.yml
       vars:
         log_dirs:

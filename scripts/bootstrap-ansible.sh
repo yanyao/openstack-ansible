@@ -22,7 +22,7 @@ set -e -u -x
 ## Vars ----------------------------------------------------------------------
 export HTTP_PROXY=${HTTP_PROXY:-""}
 export HTTPS_PROXY=${HTTPS_PROXY:-""}
-export ANSIBLE_PACKAGE=${ANSIBLE_PACKAGE:-"ansible==2.3.1.0"}
+export ANSIBLE_PACKAGE=${ANSIBLE_PACKAGE:-"ansible==2.3.2.0"}
 export ANSIBLE_ROLE_FILE=${ANSIBLE_ROLE_FILE:-"ansible-role-requirements.yml"}
 export SSH_DIR=${SSH_DIR:-"/root/.ssh"}
 export DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-"noninteractive"}
@@ -30,15 +30,14 @@ export DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-"noninteractive"}
 # Set the role fetch mode to any option [galaxy, git-clone]
 export ANSIBLE_ROLE_FETCH_MODE=${ANSIBLE_ROLE_FETCH_MODE:-git-clone}
 
-# virtualenv vars
-VIRTUALENV_OPTIONS="--always-copy"
-
 # This script should be executed from the root directory of the cloned repo
 cd "$(dirname "${0}")/.."
+
 
 ## Functions -----------------------------------------------------------------
 info_block "Checking for required libraries." 2> /dev/null ||
     source scripts/scripts-library.sh
+
 
 ## Main ----------------------------------------------------------------------
 info_block "Bootstrapping System with Ansible"
@@ -57,46 +56,50 @@ ssh_key_create
 # Determine the distribution which the host is running on
 determine_distro
 
+# Prefer dnf over yum for CentOS.
+which dnf &>/dev/null && RHT_PKG_MGR='dnf' || RHT_PKG_MGR='yum'
+
 # Install the base packages
 case ${DISTRO_ID} in
     centos|rhel)
-        yum -y install git python2 curl autoconf gcc-c++ \
-          python2-devel gcc libffi-devel nc openssl-devel \
-          python-pyasn1 pyOpenSSL python-ndg_httpsclient \
-          python-netaddr python-prettytable python-crypto PyYAML \
-          python-virtualenv
-          VIRTUALENV_OPTIONS=""
+        $RHT_PKG_MGR -y install \
+          git curl autoconf gcc gcc-c++ nc \
+          python2 python2-devel \
+          openssl-devel libffi-devel \
+          libselinux-python
         ;;
     ubuntu)
         apt-get update
         DEBIAN_FRONTEND=noninteractive apt-get -y install \
-          git python-all python-dev curl python2.7-dev build-essential \
-          libssl-dev libffi-dev netcat python-requests python-openssl python-pyasn1 \
-          python-netaddr python-prettytable python-crypto python-yaml \
-          python-virtualenv
+          git-core curl gcc netcat \
+          python-minimal python-dev \
+          python3 python3-dev \
+          libssl-dev libffi-dev \
+          python-apt python3-apt
+        ;;
+    opensuse)
+        zypper -n install -l git-core curl autoconf gcc gcc-c++ \
+            netcat-openbsd python python-xml python-devel gcc \
+            libffi-devel libopenssl-devel python-pip
+        # Leap ships with python3.4 which is not supported by ansible and as
+        # such we are using python2
+        # See https://github.com/ansible/ansible/issues/24180
+        PYTHON_EXEC_PATH="/usr/bin/python2"
+        alternatives --set pip /usr/bin/pip2.7
         ;;
 esac
-
-# NOTE(mhayden): Ubuntu 16.04 needs python-ndg-httpsclient for SSL SNI support.
-#                This package is not needed in Ubuntu 14.04 and isn't available
-#                there as a package.
-if [[ "${DISTRO_ID}" == 'ubuntu' ]] && [[ "${DISTRO_VERSION_ID}" == '16.04' ]]; then
-  DEBIAN_FRONTEND=noninteractive apt-get -y install python-ndg-httpsclient
-fi
-
-# Install pip
-get_pip
 
 # Ensure we use the HTTPS/HTTP proxy with pip if it is specified
 PIP_OPTS=""
 if [ -n "$HTTPS_PROXY" ]; then
   PIP_OPTS="--proxy $HTTPS_PROXY"
+
 elif [ -n "$HTTP_PROXY" ]; then
   PIP_OPTS="--proxy $HTTP_PROXY"
 fi
 
 # Figure out the version of python is being used
-PYTHON_EXEC_PATH="$(which python2 || which python)"
+PYTHON_EXEC_PATH="${PYTHON_EXEC_PATH:-$(which python3 || which python2 || which python)}"
 PYTHON_VERSION="$($PYTHON_EXEC_PATH -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
 
 # Use https when Python with native SNI support is available
@@ -105,25 +108,55 @@ UPPER_CONSTRAINTS_PROTO=$([ "$PYTHON_VERSION" == $(echo -e "$PYTHON_VERSION\n2.7
 # Set the location of the constraints to use for all pip installations
 export UPPER_CONSTRAINTS_FILE=${UPPER_CONSTRAINTS_FILE:-"$UPPER_CONSTRAINTS_PROTO://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt?id=$(awk '/requirements_git_install_branch:/ {print $2}' playbooks/defaults/repo_packages/openstack_services.yml)"}
 
+# Install pip on the host if it is not already installed,
+# but also make sure that it is at least version 9.x or above.
+PIP_VERSION=$(pip --version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
+if [[ "${PIP_VERSION}" -lt "9" ]]; then
+  get_pip ${PYTHON_EXEC_PATH}
+  # Ensure that our shell knows about the new pip
+  hash -r pip
+fi
+
+# Install the requirements for the various python scripts
+# on to the host, including virtualenv.
+pip install ${PIP_OPTS} \
+  --requirement requirements.txt \
+  --constraint ${UPPER_CONSTRAINTS_FILE} \
+  || pip install ${PIP_OPTS} \
+       --requirement requirements.txt \
+       --constraint ${UPPER_CONSTRAINTS_FILE} \
+       --isolated
+
 # Create a Virtualenv for the Ansible runtime
-virtualenv --clear ${VIRTUALENV_OPTIONS} --python="${PYTHON_EXEC_PATH}" /opt/ansible-runtime
+if [ -f "/opt/ansible-runtime/bin/python" ]; then
+  VENV_PYTHON_VERSION="$(/opt/ansible-runtime/bin/python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
+  if [ "$PYTHON_VERSION" != "$VENV_PYTHON_VERSION" ]; then
+    rm -rf /opt/ansible-runtime
+  fi
+fi
+virtualenv --python=${PYTHON_EXEC_PATH} \
+           --clear \
+           --no-pip --no-setuptools --no-wheel \
+           /opt/ansible-runtime
+
+# Install pip, setuptools and wheel into the venv
+get_pip /opt/ansible-runtime/bin/python
 
 # The vars used to prepare the Ansible runtime venv
-PIP_OPTS+=" --upgrade"
 PIP_COMMAND="/opt/ansible-runtime/bin/pip"
+PIP_OPTS+=" --constraint global-requirement-pins.txt"
+PIP_OPTS+=" --constraint ${UPPER_CONSTRAINTS_FILE}"
 
 # When upgrading there will already be a pip.conf file locking pip down to the
 # repo server, in such cases it may be necessary to use --isolated because the
 # repo server does not meet the specified requirements.
 
-# Ensure we are running the required versions of pip, wheel and setuptools
-${PIP_COMMAND} install ${PIP_OPTS} ${PIP_INSTALL_OPTIONS} || ${PIP_COMMAND} install ${PIP_OPTS} --isolated ${PIP_INSTALL_OPTIONS}
+# Install ansible and the other required packages
+${PIP_COMMAND} install ${PIP_OPTS} -r requirements.txt ${ANSIBLE_PACKAGE} \
+  || ${PIP_COMMAND} install --isolated ${PIP_OPTS} -r requirements.txt ${ANSIBLE_PACKAGE}
 
-# Set the constraints now that we know we're using the right version of pip
-PIP_OPTS+=" --constraint global-requirement-pins.txt --constraint ${UPPER_CONSTRAINTS_FILE}"
-
-# Install the required packages for ansible
-$PIP_COMMAND install $PIP_OPTS -r requirements.txt ${ANSIBLE_PACKAGE} || $PIP_COMMAND install --isolated $PIP_OPTS -r requirements.txt ${ANSIBLE_PACKAGE}
+# Install our osa_toolkit code from the current checkout
+$PIP_COMMAND install -e .
 
 # Ensure that Ansible binaries run from the venv
 pushd /opt/ansible-runtime/bin
@@ -235,7 +268,8 @@ if [ -f "${ANSIBLE_ROLE_FILE}" ]; then
     pushd tests
       ansible-playbook get-ansible-role-requirements.yml \
                        -i ${OSA_CLONE_DIR}/tests/test-inventory.ini \
-                       -e role_file="${ANSIBLE_ROLE_FILE}"
+                       -e role_file="${ANSIBLE_ROLE_FILE}" \
+                       -vvv
     popd
   else
     echo "Please set the ANSIBLE_ROLE_FETCH_MODE to either of the following options ['galaxy', 'git-clone']"

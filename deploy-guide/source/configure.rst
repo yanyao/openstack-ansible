@@ -50,8 +50,13 @@ these services include databases, Memcached, and RabbitMQ. Several other
 host types contain other types of containers, and all of these are listed
 in the ``openstack_user_config.yml`` file.
 
-For examples, please see :ref:`test-environment-config` and
-:ref:`production-environment-config`.
+Some services, such as glance, heat, horizon and nova-infra, are not listed
+individually in the example file as they are contained in the os-infra hosts.
+You can specify image-hosts or dashboard-hosts if you want to scale out in a
+specific manner.
+
+For examples, please see :ref:`test-environment-config`,
+:ref:`production-environment-config`, and :ref:`pod-environment-config`
 
 For details about how the inventory is generated from the environment
 configuration, see

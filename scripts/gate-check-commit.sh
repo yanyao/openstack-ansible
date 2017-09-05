@@ -33,13 +33,15 @@ export BOOTSTRAP_OPTS=${BOOTSTRAP_OPTS:-''}
 # Ensure the terminal type is set
 export TERM=linux
 
-# This variable is being added to ensure the gate job executes an exit
-#  function at the end of the run.
-export OSA_GATE_JOB=true
+# Store the clone repo root location
+export OSA_CLONE_DIR="$(readlink -f $(dirname ${0})/..)"
 
 # Set the role fetch mode to git-clone to avoid interactions
 # with the Ansible galaxy API.
 export ANSIBLE_ROLE_FETCH_MODE="git-clone"
+
+# The directory in which the ansible logs will be placed
+export ANSIBLE_LOG_DIR="/openstack/log/ansible-logging"
 
 # Set the scenario to execute based on the first CLI parameter
 export SCENARIO=${1:-"aio"}
@@ -51,21 +53,14 @@ export ACTION=${2:-"deploy"}
 # Set the source branch for upgrade tests
 # Be sure to change this whenever a new stable branch
 # is created. The checkout must always be N-1.
-export UPGRADE_SOURCE_BRANCH=${UPGRADE_SOURCE_BRANCH:-'stable/ocata'}
+export UPGRADE_SOURCE_BRANCH=${UPGRADE_SOURCE_BRANCH:-'stable/pike'}
 
-## Functions -----------------------------------------------------------------
-info_block "Checking for required libraries." 2> /dev/null || source "$(dirname "${0}")/scripts-library.sh"
-
-## Main ----------------------------------------------------------------------
-# Set gate job exit traps, this is run regardless of exit state when the job finishes.
-trap gate_job_exit_tasks EXIT
-
-# Log some data about the instance and the rest of the system
-log_instance_info
-
+## Change branch for Upgrades ------------------------------------------------
 # If the action is to upgrade, then store the current SHA,
 # checkout the source SHA before executing the greenfield
 # deployment.
+# This needs to be done before the first "source" to ensure
+# the correct functions are used for the branch.
 if [[ "${ACTION}" == "upgrade" ]]; then
     # Store the target SHA/branch
     export UPGRADE_TARGET_BRANCH=$(git rev-parse HEAD)
@@ -74,8 +69,19 @@ if [[ "${ACTION}" == "upgrade" ]]; then
     git checkout origin/${UPGRADE_SOURCE_BRANCH}
 fi
 
+## Functions -----------------------------------------------------------------
+info_block "Checking for required libraries." 2> /dev/null || source "${OSA_CLONE_DIR}/scripts/scripts-library.sh"
+
+## Main ----------------------------------------------------------------------
+
+# Set gate job exit traps, this is run regardless of exit state when the job finishes.
+trap gate_job_exit_tasks EXIT
+
+# Log some data about the instance and the rest of the system
+log_instance_info
+
 # Get minimum disk size
-DATA_DISK_MIN_SIZE="$((1024**3 * $(awk '/bootstrap_host_data_disk_min_size/{print $2}' "$(dirname "${0}")/../tests/roles/bootstrap-host/defaults/main.yml") ))"
+DATA_DISK_MIN_SIZE="$((1024**3 * $(awk '/bootstrap_host_data_disk_min_size/{print $2}' "${OSA_CLONE_DIR}/tests/roles/bootstrap-host/defaults/main.yml") ))"
 
 # Determine the largest secondary disk device that meets the minimum size
 DATA_DISK_DEVICE=$(lsblk -brndo NAME,TYPE,RO,SIZE | awk '/d[b-z]+ disk 0/{ if ($4>m && $4>='$DATA_DISK_MIN_SIZE'){m=$4; d=$1}}; END{print d}')
@@ -99,7 +105,7 @@ if [ -f zuul.env ]; then
 fi
 
 # Bootstrap Ansible
-source "$(dirname "${0}")/bootstrap-ansible.sh"
+source "${OSA_CLONE_DIR}/scripts/bootstrap-ansible.sh"
 
 # Install ARA and add it to the callback path provided by bootstrap-ansible.sh/openstack-ansible.rc
 # This is added *here* instead of bootstrap-ansible so it's used for CI purposes only.
@@ -110,7 +116,10 @@ else
   # This installs from pypi
   /opt/ansible-runtime/bin/pip install ara
 fi
-export ANSIBLE_CALLBACK_PLUGINS="/etc/ansible/roles/plugins/callback:/opt/ansible-runtime/lib/python2.7/site-packages/ara/plugins/callbacks"
+# Dynamically retrieve the location of the ARA callback so we are able to find
+# it on both py2 and py3
+ara_location=$(/opt/ansible-runtime/bin/python -c "import os,ara; print(os.path.dirname(ara.__file__))")
+export ANSIBLE_CALLBACK_PLUGINS="/etc/ansible/roles/plugins/callback:${ara_location}/plugins/callbacks"
 
 # Log some data about the instance and the rest of the system
 log_instance_info
@@ -131,7 +140,7 @@ unset ANSIBLE_VARS_PLUGINS
 unset HOST_VARS_PATH
 unset GROUP_VARS_PATH
 
-pushd "$(dirname "${0}")/../tests"
+pushd "${OSA_CLONE_DIR}/tests"
   if [ -z "${BOOTSTRAP_OPTS}" ]; then
     /opt/ansible-runtime/bin/ansible-playbook bootstrap-aio.yml \
                      -i test-inventory.ini \
@@ -147,23 +156,48 @@ popd
 # Implement the log directory
 mkdir -p /openstack/log
 
-pushd "$(dirname "${0}")/../playbooks"
+pushd "${OSA_CLONE_DIR}/playbooks"
   # Disable Ansible color output
   export ANSIBLE_NOCOLOR=1
 
-  # Create ansible logging directory and add in a log file export
-  mkdir -p /openstack/log/ansible-logging
-  export ANSIBLE_LOG_PATH="/openstack/log/ansible-logging/ansible.log"
+  # Create ansible logging directory
+  mkdir -p ${ANSIBLE_LOG_DIR}
+
+  # Log some data about the instance and the rest of the system
+  log_instance_info
+
+  # First we gather facts about the hosts to populate the fact cache.
+  # We can't gather the facts for all hosts yet because the containers
+  # aren't built yet.
+  ansible -m setup -a 'gather_subset=network,hardware,virtual' hosts 2>${ANSIBLE_LOG_DIR}/facts-hosts.log
+
+  # Prepare the hosts
+  export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-hosts.log"
+  openstack-ansible setup-hosts.yml -e gather_facts=False
+
+  # Log some data about the instance and the rest of the system
+  log_instance_info
+
+  # Once setup-hosts is complete, we should gather facts for everything
+  # (now including containers) so that the fact cache is complete for the
+  # remainder of the run.
+  ansible -m setup -a 'gather_subset=network,hardware,virtual' all 1>${ANSIBLE_LOG_DIR}/facts-all.log
+
+  # Prepare the infrastructure
+  export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-infrastructure.log"
+  openstack-ansible setup-infrastructure.yml -e gather_facts=False
+
+  # Log some data about the instance and the rest of the system
+  log_instance_info
+
+  # Setup OpenStack
+  export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-openstack.log"
+  openstack-ansible setup-openstack.yml -e gather_facts=False
+
+  # Log some data about the instance and the rest of the system
+  log_instance_info
+
 popd
-
-# Log some data about the instance and the rest of the system
-log_instance_info
-
-# Execute the Playbooks
-bash "$(dirname "${0}")/run-playbooks.sh"
-
-# Log some data about the instance and the rest of the system
-log_instance_info
 
 # If the action is to upgrade, then checkout the original SHA for
 # the checkout, and execute the upgrade.
@@ -183,8 +217,11 @@ if [[ "${ACTION}" == "upgrade" ]]; then
     unset ANSIBLE_PACKAGE
     unset UPPER_CONSTRAINTS_FILE
 
+    # Source the current scripts-library.sh functions
+    source "${OSA_CLONE_DIR}/scripts/scripts-library.sh"
+
     # Kick off the data plane tester
-    $(dirname "${0}")/../tests/data-plane-test.sh &
+    bash ${OSA_CLONE_DIR}/tests/data-plane-test.sh &> /var/log/data-plane-error.log &
 
     # Fetch script to execute API availability tests, then
     # background them while the upgrade runs.
@@ -194,7 +231,7 @@ if [[ "${ACTION}" == "upgrade" ]]; then
     # To execute the upgrade script we need to provide
     # an affirmative response to the warning that the
     # upgrade is irreversable.
-    echo 'YES' | bash "$(dirname "${0}")/run-upgrade.sh"
+    echo 'YES' | bash "${OSA_CLONE_DIR}/scripts/run-upgrade.sh"
 
     # Terminate the API availability tests
     kill_bowling_ball_tests

@@ -14,16 +14,12 @@
 
 import os
 from os import path
-import sys
 import test_inventory
 import unittest
 
-MANAGE_DIR = path.join(os.getcwd(), 'osa_toolkit')
 TARGET_DIR = path.join(os.getcwd(), 'tests', 'inventory')
 
-sys.path.append(MANAGE_DIR)
-
-import manage as mi
+from osa_toolkit import manage as mi
 
 
 def setUpModule():
@@ -97,7 +93,7 @@ class TestRemoveIpfunction(unittest.TestCase):
         mi.remove_inventory_item("log_hosts", inventory)
         mi.remove_inventory_item("log_hosts", inventory, TARGET_DIR)
 
-        # No make sure it's gone
+        # Now make sure it's gone
         self.assertIn('log_hosts', inventory)
 
     def test_metal_ips_kept(self):
@@ -127,4 +123,4 @@ class TestRemoveIpfunction(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(catchbreak=True)

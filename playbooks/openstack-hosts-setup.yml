@@ -13,40 +13,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# NOTE(mhayden): CentOS always has python (because of yum), but it's possible
+# that Ubuntu nodes may not have python by default. Ansible doesn't work very
+# well if Python isn't installed.
+#
+# Also, we can't use a 'when' to check for the ansible_pkg_mgr here because
+# we haven't gathered facts yet.
 - name: Install Ansible prerequisites
   hosts: "{{ openstack_host_group|default('hosts') }}"
   gather_facts: false
   user: root
   pre_tasks:
-    - name: Install Python2
+    - name: Ensure python is installed
       register: result
-      raw: >
-        source /etc/os-release
-
-        case ${ID} in
-          centos|rhel)
-            yum list installed python
-            result=$?
-
-            if [ $result -eq 1 ]; then
-              yum -y install python2
-              result=2
-            fi
-
-            exit $result;
-          ;;
-          ubuntu)
-            dpkg-query -s python &> /dev/null
-            result=$?
-
-            if [ $result -eq 1 ]; then
-              apt-get -y install python
-              result=2
-            fi
-
-            exit $result;
-          ;;
-        esac
+      raw: |
+        if which apt-get >/dev/null && ! which python >/dev/null ; then
+          apt-get -y install python
+          exit 2
+        else
+          exit 0
+        fi
       changed_when: "result.rc == 2"
       failed_when: "{{ result.rc not in [0, 2] }}"
 
@@ -60,8 +46,9 @@
       assert:
         that:
           - (ansible_distribution == 'Ubuntu' and ansible_distribution_release == 'xenial') or
-            (ansible_os_family == 'RedHat' and ansible_distribution_major_version == '7')
-        msg: "The only supported platforms for this release are Ubuntu 16.04 LTS (Xenial) and CentOS 7 (WIP)"
+            (ansible_os_family == 'RedHat' and ansible_distribution_major_version == '7') or
+            (ansible_os_family == 'Suse' and ansible_distribution_major_version == '42')
+        msg: "The only supported platforms for this release are Ubuntu 16.04 LTS (Xenial), CentOS 7 (WIP) and openSUSE Leap 42.X (WIP)"
   roles:
     - role: "openstack_hosts"
   environment: "{{ deployment_environment_variables | default({}) }}"

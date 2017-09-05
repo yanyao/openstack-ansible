@@ -13,15 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- include: common-playbooks/unbound-clients.yml
+  vars:
+    unbound_group: "cinder_all"
+  when:
+    - resolvconf_enabled | bool
+
 - name: Prepare MQ/DB services
   hosts: cinder_all
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: no
   user: root
   environment: "{{ deployment_environment_variables | default({}) }}"
   tags:
     - cinder
   tasks:
-
     - name: Configure rabbitmq vhost/user
       include: common-tasks/rabbitmq-vhost-user.yml
       vars:
@@ -78,7 +83,7 @@
   include: common-playbooks/cinder.yml
   vars:
     cinder_hosts: "cinder_volume:!cinder_scheduler:!cinder_api"
-    cinder_serial: "{{ cinder_backend_serial | default('1') }}"
+    cinder_serial: "{{ cinder_backend_serial | default('1', '100%') }}"
 
 
 
@@ -86,7 +91,7 @@
   include: common-playbooks/cinder.yml
   vars:
     cinder_hosts: "cinder_backup:!cinder_volume:!cinder_scheduler:!cinder_api"
-    cinder_serial: "{{ cinder_backend_serial | default('1') }}"
+    cinder_serial: "{{ cinder_backend_serial | default(['1', '100%']) }}"
 
 
 
@@ -96,7 +101,7 @@
 # a long time if executed against a large inventory.
 - name: Refresh local facts after all software changes are made
   hosts: cinder_all
-  max_fail_percentage: 20
+  gather_facts: no
   user: root
   environment: "{{ deployment_environment_variables | default({}) }}"
   tags:
@@ -139,7 +144,7 @@
 - name: Restart cinder agents to ensure new RPC object version is used
   hosts: cinder_backup,cinder_volume,cinder_scheduler
   gather_facts: no
-  serial: "{{ cinder_backend_serial | default('1') }}"
+  serial: "{{ cinder_backend_serial | default(['1', '100%']) }}"
   max_fail_percentage: 20
   user: root
   environment: "{{ deployment_environment_variables | default({}) }}"
@@ -149,13 +154,13 @@
     - name: Execute cinder service reload
       include: common-tasks/restart-service.yml
       vars:
-        service_name: "{{ item }}"
-        service_action: "reloaded"
+        service_name: "{{ item.name }}"
+        service_action: "{{ item.action }}"
         service_fact: "cinder"
       with_items:
-        - cinder-backup
-        - cinder-volume
-        - cinder-scheduler
+        - { name: "cinder-backup", action: "restarted" }
+        - { name: "cinder-volume", action: "restarted" }
+        - { name: "cinder-scheduler", action: "restarted" }
       when:
         - "cinder_all_software_updated | bool"
         - "ansible_local['openstack_ansible']['cinder']['need_service_restart'] | bool"
@@ -212,7 +217,7 @@
     - cinder
   tasks:
     - name: Perform online data migrations
-      command: "{{ cinder_bin }}/cinder-manage db online-data-migrations"
+      command: "{{ cinder_bin }}/cinder-manage db online_data_migrations"
       become: yes
       become_user: "{{ cinder_system_user_name }}"
       when:
@@ -229,4 +234,3 @@
         value: False
       when:
         - data_migrations | succeeded
-

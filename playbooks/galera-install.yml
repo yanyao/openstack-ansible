@@ -13,6 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- include: common-playbooks/unbound-clients.yml
+  vars:
+    unbound_group: "galera_all"
+  when:
+    - resolvconf_enabled | bool
+
 - name: Galera container config
   hosts: galera_all
   gather_facts: "{{ gather_facts | default(True) }}"
@@ -29,7 +35,7 @@
       vars:
         list_of_bind_mounts: "{{ galera_container_bind_mounts }}"
         extra_container_config_no_restart:
-          - "lxc.start.order=99"
+          - "lxc.start.order=10"
     - include: common-tasks/package-cache-proxy.yml
   vars:
     is_metal: "{{ properties.is_metal|default(false) }}"
@@ -44,9 +50,6 @@
   max_fail_percentage: 20
   user: root
   roles:
-    - role: "pip_install"
-      tags:
-        - pip
     - role: "galera_server"
     - role: "rsyslog_client"
       rsyslog_client_log_rotate_file: galera_log_rotate

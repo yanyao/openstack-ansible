@@ -13,15 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- include: common-playbooks/unbound-clients.yml
+  vars:
+    unbound_group: "glance_all"
+  when:
+    - resolvconf_enabled | bool
+
 - name: Prepare MQ/DB services
   hosts: glance_all
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: no
   user: root
   environment: "{{ deployment_environment_variables | default({}) }}"
   tags:
     - glance
   tasks:
-
     - name: Configure rabbitmq vhost/user
       include: common-tasks/rabbitmq-vhost-user.yml
       vars:
@@ -80,6 +85,7 @@
 # a long time if executed against a large inventory.
 - name: Refresh local facts after all software changes are made
   hosts: glance_all
+  gather_facts: no
   max_fail_percentage: 20
   user: root
   environment: "{{ deployment_environment_variables | default({}) }}"
@@ -145,6 +151,7 @@
       vars:
         service_name: "glance-api"
         service_action: "restarted"
+        service_fact: "glance"
       when:
         - "glance_all_software_updated | bool"
         - "ansible_local['openstack_ansible']['glance']['need_service_restart'] | bool"

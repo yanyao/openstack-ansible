@@ -24,7 +24,7 @@
   retries: 5
   delay: 2
   when:
-    - ansible_pkg_mgr == 'yum'
+    - ansible_pkg_mgr in ['yum', 'dnf']
 
 - name: Remove known problem packages
   package:
@@ -37,6 +37,9 @@
   package:
     name: "{{ packages_install }}"
     state: present
+    # NOTE(hwoarang) Ubuntu has updated its cache before so no need to do it
+    # again
+    update_cache: "{{ (ansible_pkg_mgr == 'zypper') | ternary('yes', omit) }}"
   tags:
     - install-packages
 

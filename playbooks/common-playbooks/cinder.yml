@@ -50,7 +50,7 @@
           - "lxc.cgroup.devices.allow=a *:* rmw"
           - "lxc.mount.entry=udev dev devtmpfs defaults 0 0"
         extra_container_config_no_restart:
-          - "lxc.start.order=79"
+          - "lxc.start.order=39"
       when:
         - "'cinder_volume' in group_names"
         - "cinder_backend_lvm_inuse | bool"
@@ -96,15 +96,6 @@
   roles:
     - role: "os_cinder"
       cinder_storage_address: "{{ storage_address }}"
-
-    - role: "ceph_client"
-      openstack_service_system_user: "{{ cinder_system_user_name }}"
-      openstack_service_venv_bin: "{{ cinder_bin }}"
-      when:
-        - "'cinder_volume' in group_names"
-        - "cinder_backend_rbd_inuse | default(false) | bool"
-      tags:
-        - ceph
 
     - role: "rsyslog_client"
       rsyslog_client_log_rotate_file: cinder_log_rotate

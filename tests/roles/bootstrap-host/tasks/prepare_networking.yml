@@ -40,7 +40,7 @@
   with_items: "{{ bridges }}"
   register: network_interfaces_rhel
   when:
-    - ansible_pkg_mgr == 'yum'
+    - ansible_pkg_mgr in ['yum', 'dnf']
 
 - name: Create alias file when required (RedHat)
   template:
@@ -48,12 +48,12 @@
     dest: "/etc/sysconfig/network-scripts/ifcfg-{{ item.name | default('br-mgmt')}}:0"
   with_items: "{{ bridges }}"
   when:
-    - ansible_pkg_mgr == 'yum'
+    - ansible_pkg_mgr in ['yum', 'dnf']
     - item.alias is defined
 
 - name: Put down post-up script for veth-peer interfaces (RedHat)
   template:
-    src: "redhat_interface_{{ item[0] | default('default') }}.cfg.j2"
+    src: "rpm_interface_{{ item[0] }}.cfg.j2"
     dest: "/etc/sysconfig/network-scripts/{{ item[0] }}-veth-{{ item[1].name | default('br-mgmt') }}-2-{{ item[1].veth_peer | default('eth1') }}"
     mode: "0755"
   with_nested:
@@ -61,7 +61,7 @@
     - "{{ bridges }}"
   when:
     - item[1].veth_peer is defined
-    - ansible_pkg_mgr == 'yum'
+    - ansible_pkg_mgr in ['yum', 'dnf']
 
 - name: Ensure the postup/postdown scripts are loaded (RedHat)
   lineinfile:
@@ -73,7 +73,50 @@
     - "{{ bridges }}"
   when:
     - item[1].veth_peer is defined
-    - ansible_pkg_mgr == 'yum'
+    - ansible_pkg_mgr in ['yum', 'dnf']
+
+- name: Copy network configuration (SUSE)
+  template:
+    src: "suse_interface_default.cfg.j2"
+    dest: "/etc/sysconfig/network/ifcfg-{{ item.name | default('br-mgmt') }}"
+  with_items: "{{ bridges }}"
+  register: network_interfaces_suse
+  when:
+    - ansible_pkg_mgr == 'zypper'
+
+- name: Put down post-up script for veth-peer interfaces (SUSE)
+  template:
+    src: "rpm_interface_{{ item[0] }}.cfg.j2"
+    dest: "/etc/sysconfig/network/scripts/{{ item[0] }}-veth-{{ item[1].name | default('br-mgmt') }}-2-{{ item[1].veth_peer | default('eth1') }}"
+    mode: "0755"
+  with_nested:
+    - [ "ifup-post", "ifdown-post" ]
+    - "{{ bridges }}"
+  when:
+    - item[1].veth_peer is defined
+    - ansible_pkg_mgr == 'zypper'
+
+- name: Ensure the postup scripts are loaded (SUSE)
+  lineinfile:
+    dest: "/etc/sysconfig/network/ifcfg-{{ item[1].name | default('br-mgmt') }}"
+    line: "POST_UP_SCRIPT=\"compat:suse:{{ item[0] }}-veth-{{ item[1].name | default('br-mgmt') }}-2-{{ item[1].veth_peer | default('eth1') }}\""
+  with_nested:
+    - [ "ifup-post" ]
+    - "{{ bridges }}"
+  when:
+    - item[1].veth_peer is defined
+    - ansible_pkg_mgr == 'zypper'
+
+- name: Ensure the postdown scripts are loaded (SUSE)
+  lineinfile:
+    dest: "/etc/sysconfig/network/ifcfg-{{ item[1].name | default('br-mgmt') }}"
+    line: "POST_DOWN_SCRIPT=\"compat:suse:{{ item[0] }}-veth-{{ item[1].name | default('br-mgmt') }}-2-{{ item[1].veth_peer | default('eth1') }}\""
+  with_nested:
+    - [ "ifdown-post" ]
+    - "{{ bridges }}"
+  when:
+    - item[1].veth_peer is defined
+    - ansible_pkg_mgr == 'zypper'
 
 - name: Copy multinode network configuration (Debian)
   template:
@@ -96,13 +139,17 @@
     - networking-interfaces-load
 
 - name: Shut down the network interfaces
-  command: "ifdown {{ item }}"
-  when: osa_interfaces | changed or osa_multinode_interfaces | changed or network_interfaces_rhel | changed
+  command: "ifdown {{ item.name }}"
+  when:
+    - osa_interfaces | changed or osa_multinode_interfaces | changed or network_interfaces_rhel | changed
+    - item.enabled | default(True)
   with_items:
-    - br-mgmt
-    - br-storage
-    - br-vlan
-    - br-vxlan
+    - { name: br-mgmt }
+    - { name: br-storage }
+    - { name: br-vlan }
+    - { name: br-vxlan }
+    - { name: br-dbaas, enabled: "{{ (bootstrap_host_scenario == 'translations') | bool }}" }
+    - { name: br-lbaas, enabled: "{{ (bootstrap_host_scenario in ['translations', 'octavia']) | bool }}" }
   tags:
     - networking-interfaces-stop
 
@@ -125,13 +172,17 @@
     - networking-interfaces-start
 
 - name: Start the network interfaces
-  command: "ifup {{ item }}"
-  when: osa_interfaces | changed or network_interfaces_rhel | changed
+  command: "ifup {{ item.name }}"
+  when:
+    - osa_interfaces | changed or network_interfaces_rhel | changed or network_interfaces_suse | changed
+    - item.enabled | default(True)
   with_items:
-    - br-mgmt
-    - br-storage
-    - br-vlan
-    - br-vxlan
+    - { name: br-mgmt }
+    - { name: br-storage }
+    - { name: br-vlan }
+    - { name: br-vxlan }
+    - { name: br-dbaas, enabled: "{{ (bootstrap_host_scenario == 'translations') | bool }}" }
+    - { name: br-lbaas, enabled: "{{ (bootstrap_host_scenario in ['translations', 'octavia']) | bool }}" }
   tags:
     - networking-interfaces-start
 

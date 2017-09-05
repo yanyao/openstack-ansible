@@ -22,6 +22,7 @@
     - role: "pip_install"
     - role: "bootstrap-host"
   vars:
+    ansible_python_interpreter: "/usr/bin/python"
     openstack_confd_entries: "{{ confd_overrides[bootstrap_host_scenario] }}"
     bootstrap_host_scenario: "{{ lookup('env','SCENARIO') | default('aio', true) }}"
     confd_overrides:
@@ -46,7 +47,35 @@
         - name: neutron.yml.aio
         - name: nova.yml.aio
         - name: swift.yml.aio
-    sftp_subsystem: "{{ (ansible_pkg_mgr == 'apt') | ternary('sftp /usr/lib/openssh/sftp-server','sftp /usr/libexec/openssh/sftp-server') }}"
+      translations:
+        - name: cinder.yml.aio
+        - name: designate.yml.aio
+        - name: glance.yml.aio
+        - name: heat.yml.aio
+        - name: horizon.yml.aio
+        - name: keystone.yml.aio
+        - name: neutron.yml.aio
+        - name: nova.yml.aio
+        - name: swift.yml.aio
+        - name: sahara.yml.aio
+        - name: magnum.yml.aio
+        - name: octavia.yml.aio
+        - name: trove.yml.aio
+      octavia:
+        - name: glance.yml.aio
+        - name: keystone.yml.aio
+        - name: neutron.yml.aio
+        - name: nova.yml.aio
+        - name: octavia.yml.aio
+      tacker:
+        - name: keystone.yml.aio
+        - name: heat.yml.aio
+        - name: tacker.yml.aio
+    pip_install_upper_constraints_proto: "{{ ansible_python_version | version_compare('2.7.9', '>=') | ternary('https','http') }}"
+    sftp_subsystem:
+        'apt': 'sftp /usr/lib/openssh/sftp-server'
+        'yum': 'sftp /usr/libexec/openssh/sftp-server'
+        'zypper': 'sftp /usr/lib/ssh/sftp-server'
     sshd:
       ListenAddress:
         - 0.0.0.0
@@ -78,7 +107,7 @@
       PrintLastLog: no
       TCPKeepAlive: yes
       AcceptEnv: "LANG LC_*"
-      Subsystem: "{{ sftp_subsystem }}"
+      Subsystem: "{{ sftp_subsystem[ansible_pkg_mgr] }}"
       UsePAM: yes
       UseDNS: no
       X11Forwarding: no
@@ -88,4 +117,5 @@
       MaxStartups: "100:100:100"
       GSSAPIAuthentication: no
       GSSAPICleanupCredentials: no
-
+  vars_files:
+    - "{{ playbook_dir }}/../playbooks/defaults/repo_packages/openstack_services.yml"

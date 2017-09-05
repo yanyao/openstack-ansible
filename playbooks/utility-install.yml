@@ -13,12 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- include: common-playbooks/unbound-clients.yml
+  vars:
+    unbound_group: "utility_all"
+  when:
+    - resolvconf_enabled | bool
+
 - name: Setup the utility location(s)
   hosts: utility_all
   max_fail_percentage: 20
   user: root
   pre_tasks:
-
     - include: common-tasks/os-lxc-container-setup.yml
 
     - include: common-tasks/os-log-dir-setup.yml
@@ -38,9 +43,6 @@
 
   roles:
     - role: "galera_client"
-    - role: "pip_install"
-      tags:
-        - pip
     - role: "openstack_openrc"
       tags:
         - openrc
@@ -51,11 +53,13 @@
       package:
         name: "{{ utility_distro_packages | default([]) }}"
         state: "{{ utility_package_state }}"
-        update_cache: "{{ (ansible_pkg_mgr == 'apt') | ternary('yes', omit) }}"
+        update_cache: "{{ (ansible_pkg_mgr in ['apt', 'zypper']) | ternary('yes', omit) }}"
         cache_valid_time: "{{ (ansible_pkg_mgr == 'apt') | ternary(cache_timeout, omit) }}"
 
     - name: Get list of python clients
       shell: "curl -s {{ repo_release_path }}/requirements_absolute_requirements.txt  | grep client | cut -d'=' -f1"
+      args:
+        warn: no
       register: client_list
       run_once: true
       changed_when: false

@@ -18,10 +18,18 @@
 ## Vars ----------------------------------------------------------------------
 LINE='----------------------------------------------------------------------'
 MAX_RETRIES=${MAX_RETRIES:-5}
-ANSIBLE_PARAMETERS=${ANSIBLE_PARAMETERS:--e gather_facts=False}
+ANSIBLE_PARAMETERS=${ANSIBLE_PARAMETERS:-""}
 STARTTIME="${STARTTIME:-$(date +%s)}"
-PIP_INSTALL_OPTIONS=${PIP_INSTALL_OPTIONS:-'pip==9.0.1 setuptools==33.1.1 wheel==0.29.0 '}
 COMMAND_LOGS=${COMMAND_LOGS:-"/openstack/log/ansible_cmd_logs"}
+
+GATE_EXIT_LOG_COPY="${GATE_EXIT_LOG_COPY:-false}"
+GATE_EXIT_LOG_GZIP="${GATE_EXIT_LOG_GZIP:-true}"
+# If this is a gate node from OpenStack-Infra Store all logs into the
+#  execution directory after gate run.
+if [[ -d "/etc/nodepool" ]]; then
+  GATE_EXIT_LOG_COPY=true
+fi
+
 
 # The default SSHD configuration has MaxSessions = 10. If a deployer changes
 #  their SSHD config, then the ANSIBLE_FORKS may be set to a higher number. We
@@ -50,41 +58,6 @@ function determine_distro {
     export DISTRO_VERSION_ID="${VERSION_ID}"
 }
 
-# Used to retry a process that may fail due to random issues.
-function successerator {
-  set +e
-  # Get the time that the method was started.
-  OP_START_TIME=$(date +%s)
-  # Set the initial return value to failure.
-  false
-  for ((RETRY=0; $? != 0 && RETRY < MAX_RETRIES; RETRY++)); do
-    if [ ${RETRY} -gt 1 ];then
-      "$@" -vvvv
-    else
-      "$@"
-    fi
-  done
-  # If max retires were hit, fail.
-  if [ $? -ne 0 ] && [ ${RETRY} -eq ${MAX_RETRIES} ];then
-    echo -e "\nHit maximum number of retries, giving up...\n"
-    exit_fail
-  fi
-  # Ensure the log directory exists
-  if [[ ! -d "${COMMAND_LOGS}" ]];then
-    mkdir -p "${COMMAND_LOGS}"
-  fi
-  # Log the time that the method completed.
-  OP_TOTAL_SECONDS="$(( $(date +%s) - OP_START_TIME ))"
-  echo -e "- Operation: [ $@ ]\t${OP_TOTAL_SECONDS} seconds\tNumber of Attempts [ ${RETRY} ]" \
-    >> ${COMMAND_LOGS}/ansible_runtime_report.txt
-  set -e
-}
-
-function install_bits {
-  # Use the successerator to run openstack-ansible
-  successerator openstack-ansible "$@" ${ANSIBLE_PARAMETERS}
-}
-
 function ssh_key_create {
   # Ensure that the ssh key exists and is an authorized_key
   key_path="${HOME}/.ssh"
@@ -95,9 +68,25 @@ function ssh_key_create {
     mkdir -p ${key_path}
     chmod 700 ${key_path}
   fi
-  if [ ! -f "${key_file}" -a ! -f "${key_file}.pub" ]; then
-    rm -f ${key_file}*
-    ssh-keygen -t rsa -f ${key_file} -N ''
+
+  # Ensure a full keypair exists
+  if [ ! -f "${key_file}" -o ! -f "${key_file}.pub" ]; then
+
+    # Regenrate public key if private key exists
+    if [ -f "${key_file}" ]; then
+      ssh-keygen -f ${key_file} -y > ${key_file}.pub
+    fi
+
+    # Delete public key if private key missing
+    if [ ! -f "${key_file}" ]; then
+      rm -f ${key_file}.pub
+    fi
+
+    # Regenerate keypair if both keys missing
+    if [ ! -f "${key_file}" -a ! -f "${key_file}.pub" ]; then
+      ssh-keygen -t rsa -f ${key_file} -N ''
+    fi
+
   fi
 
   # Ensure that the public key is included in the authorized_keys
@@ -135,8 +124,8 @@ function exit_fail {
 function gate_job_exit_tasks {
   # If this is a gate node from OpenStack-Infra Store all logs into the
   #  execution directory after gate run.
-  if [[ -d "/etc/nodepool" ]];then
-    GATE_LOG_DIR="$(dirname "${0}")/../logs"
+  if [ "$GATE_EXIT_LOG_COPY" == true ]; then
+    GATE_LOG_DIR="${OSA_CLONE_DIR:-$(dirname $0)/..}/logs"
     mkdir -p "${GATE_LOG_DIR}/host" "${GATE_LOG_DIR}/openstack"
     rsync --archive --verbose --safe-links --ignore-errors /var/log/ "${GATE_LOG_DIR}/host" || true
     rsync --archive --verbose --safe-links --ignore-errors /openstack/log/ "${GATE_LOG_DIR}/openstack" || true
@@ -147,9 +136,12 @@ function gate_job_exit_tasks {
 
     # Generate the ARA report
     /opt/ansible-runtime/bin/ara generate html "${GATE_LOG_DIR}/ara" || true
+    /opt/ansible-runtime/bin/ara generate subunit "${GATE_LOG_DIR}/ara/testrepository.subunit" || true
     # Compress the files gathered so that they do not take up too much space.
     # We use 'command' to ensure that we're not executing with some sort of alias.
-    command gzip --best --recursive "${GATE_LOG_DIR}/"
+    if [ "$GATE_EXIT_LOG_GZIP" == true ]; then
+      command gzip --best --recursive "${GATE_LOG_DIR}/"
+    fi
     # Ensure that the files are readable by all users, including the non-root
     # OpenStack-CI jenkins user.
     chmod -R 0777 "${GATE_LOG_DIR}"
@@ -178,7 +170,7 @@ function log_instance_info {
 }
 
 function get_repos_info {
-  for i in /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/yum.conf /etc/yum.repos.d/*; do
+  for i in /etc/apt/sources.list /etc/apt/sources.list.d/* /etc/yum.conf /etc/yum.repos.d/* /etc/zypp/repos.d/*; do
     if [ -f "${i}" ]; then
       echo -e "\n$i"
       cat $i
@@ -190,13 +182,13 @@ function get_repos_info {
 function get_instance_info {
   TS="$(date +"%H-%M-%S")"
   (cat /etc/resolv.conf && \
-    which systemd-resolve && \
+    which systemd-resolve &> /dev/null && \
       systemd-resolve --statistics && \
         cat /etc/systemd/resolved.conf) > \
           "/openstack/log/instance-info/host_dns_info_${TS}.log" || true
-  tracepath "8.8.8.8" -m 5 > \
+  tracepath "8.8.8.8" -m 5 || tracepath "8.8.8.8" > \
     "/openstack/log/instance-info/host_tracepath_info_${TS}.log" || true
-  tracepath6 "2001:4860:4860::8888" -m 5 >> \
+  tracepath6 "2001:4860:4860::8888" -m 5 || tracepath6 "2001:4860:4860::8888" >> \
     "/openstack/log/instance-info/host_tracepath_info_${TS}.log" || true
   if [ "$(which lxc-ls)" ]; then
     lxc-ls --fancy > \
@@ -218,7 +210,7 @@ function get_instance_info {
 
   determine_distro
   case ${DISTRO_ID} in
-      centos|rhel|fedora)
+      centos|rhel|fedora|opensuse)
           rpm -qa > \
             "/openstack/log/instance-info/host_packages_info_${TS}.log" || true
           ;;
@@ -229,53 +221,31 @@ function get_instance_info {
   esac
 }
 
-function print_report {
-  # Print the stored report data
-  cat ${COMMAND_LOGS}/ansible_runtime_report.txt
-}
-
 function get_pip {
 
-  # check if pip is already installed
-  if [ "$(which pip)" ]; then
+  # The python executable to use when executing get-pip is passed
+  # as a parameter to this function.
+  GETPIP_PYTHON_EXEC_PATH="${1:-$(which python)}"
 
-    # make sure that the right pip base packages are installed
-    # If this fails retry with --isolated to bypass the repo server because the repo server will not have
-    # been updated at this point to include any newer pip packages.
-    pip install --upgrade ${PIP_INSTALL_OPTIONS} || pip install --upgrade --isolated ${PIP_INSTALL_OPTIONS}
-
-    # Ensure that our shell knows about the new pip
-    hash -r pip
-
-  # when pip is not installed, install it
+  # Download the get-pip script using the primary or secondary URL
+  GETPIP_CMD="curl --silent --show-error --retry 5"
+  GETPIP_FILE="/opt/get-pip.py"
+  # If GET_PIP_URL is set, then just use it
+  if [ -n "${GET_PIP_URL:-}" ]; then
+    ${GETPIP_CMD} ${GET_PIP_URL} > ${GETPIP_FILE}
   else
-
-    # If GET_PIP_URL is set, then just use it
-    if [ -n "${GET_PIP_URL:-}" ]; then
-      curl --silent ${GET_PIP_URL} > /opt/get-pip.py
-      if head -n 1 /opt/get-pip.py | grep python; then
-        python /opt/get-pip.py ${PIP_INSTALL_OPTIONS}
-        return
-      fi
-    fi
-
-    # Try getting pip from bootstrap.pypa.io as a primary source
-    curl --silent https://bootstrap.pypa.io/get-pip.py > /opt/get-pip.py
-    if head -n 1 /opt/get-pip.py | grep python; then
-      python /opt/get-pip.py ${PIP_INSTALL_OPTIONS}
-      return
-    fi
-
-    # Try the get-pip.py from the github repository as a primary source
-    curl --silent https://raw.githubusercontent.com/pypa/get-pip/master/get-pip.py > /opt/get-pip.py
-    if head -n 1 /opt/get-pip.py | grep python; then
-      python /opt/get-pip.py ${PIP_INSTALL_OPTIONS}
-      return
-    fi
-
-    echo "A suitable download location for get-pip.py could not be found."
-    exit_fail
+    # Otherwise, try the two standard URL's
+    ${GETPIP_CMD} https://bootstrap.pypa.io/get-pip.py > ${GETPIP_FILE}\
+      || ${GETPIP_CMD} https://raw.githubusercontent.com/pypa/get-pip/master/get-pip.py > ${GETPIP_FILE}
   fi
+
+  ${GETPIP_PYTHON_EXEC_PATH} ${GETPIP_FILE} \
+    pip setuptools wheel \
+    --constraint global-requirement-pins.txt \
+    || ${GETPIP_PYTHON_EXEC_PATH} ${GETPIP_FILE} \
+         pip setuptools wheel \
+         --constraint global-requirement-pins.txt \
+         --isolated
 }
 
 function get_bowling_ball_tests {
