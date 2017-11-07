@@ -1,4 +1,5 @@
-# Copyright 2014, Rackspace US, Inc.
+---
+# Copyright 2016, Rackspace US, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -10,7 +11,31 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License
+# limitations under the License.
+
+haproxy_bind_on_non_local: "{% if groups.haproxy|length > 1 %}True{% else %}False{% endif %}"
+haproxy_use_keepalived: "{% if groups.haproxy|length > 1 %}True{% else %}False{% endif %}"
+keepalived_selinux_compile_rules:
+  - keepalived_ping
+  - keepalived_haproxy_pid_file
+
+# Ensure that the package state matches the global setting
+haproxy_package_state: "{{ package_state }}"
+
+haproxy_whitelist_networks:
+  - 192.168.0.0/16
+  - 172.16.0.0/12
+  - 10.0.0.0/8
+
+haproxy_galera_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_glance_registry_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_keystone_admin_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_nova_metadata_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_rabbitmq_management_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_repo_git_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_repo_cache_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_octavia_whitelist_networks: "{{ haproxy_whitelist_networks }}"
+haproxy_opendaylight_whitelist_networks: "{{ haproxy_whitelist_networks }}"
 
 haproxy_default_services:
   - service:
@@ -157,7 +182,7 @@ haproxy_default_services:
       haproxy_service_name: nova_console
       haproxy_backend_nodes: "{{ groups['nova_console'] | default([]) }}"
       haproxy_ssl: "{{ haproxy_ssl }}"
-      haproxy_port: "{{ nova_console_port }}"
+      haproxy_port: "{{ hostvars[groups['nova_console'][0]]['nova_console_port'] }}"
       haproxy_balance_type: http
       haproxy_timeout_client: 60m
       haproxy_timeout_server: 60m
@@ -212,8 +237,6 @@ haproxy_default_services:
       haproxy_balance_type: http
       haproxy_backend_options:
         - "httpchk HEAD /"
-      haproxy_backend_httpcheck_options:
-        - "expect status 401"
   - service:
       haproxy_service_name: ironic_api
       haproxy_backend_nodes: "{{ groups['ironic_api'] | default([]) }}"
@@ -277,9 +300,30 @@ haproxy_default_services:
   - service:
       haproxy_service_name: tacker
       haproxy_backend_nodes: "{{ groups['tacker_all'] | default([]) }}"
-      haproxy_port: 8888
+      haproxy_ssl: "{{ haproxy_ssl }}"
+      haproxy_port: 9890
       haproxy_balance_type: http
       haproxy_backend_options:
         - "forwardfor"
         - "httpchk"
         - "httplog"
+  - service:
+      haproxy_service_name: opendaylight
+      haproxy_backend_nodes: "{{ groups['neutron_server'] | default([]) }}"
+      haproxy_bind: "{{ [internal_lb_vip_address] }}"
+      haproxy_port: 8181
+      haproxy_balance_type: tcp
+      haproxy_timeout_client: 5000s
+      haproxy_timeout_server: 5000s
+      haproxy_whitelist_networks: "{{ haproxy_opendaylight_whitelist_networks }}"
+      haproxy_service_enabled: "{{ neutron_plugin_type == 'ml2.opendaylight' }}"
+  - service:
+      haproxy_service_name: opendaylight-neutron
+      haproxy_backend_nodes: "{{ groups['neutron_server'] | default([]) }}"
+      haproxy_bind: "{{ [internal_lb_vip_address] }}"
+      haproxy_port: 8080
+      haproxy_balance_type: tcp
+      haproxy_timeout_client: 5000s
+      haproxy_timeout_server: 5000s
+      haproxy_whitelist_networks: "{{ haproxy_opendaylight_whitelist_networks }}"
+      haproxy_service_enabled: "{{ neutron_plugin_type == 'ml2.opendaylight' }}"

@@ -61,7 +61,7 @@ system packages are upgraded and then reboot into the new kernel:
 
    ## CentOS
    # yum upgrade
-   # yum install https://rdoproject.org/repos/openstack-ocata/rdo-release-ocata.rpm
+   # yum install https://rdoproject.org/repos/openstack-pike/rdo-release-pike.rpm
    # yum install git
    # reboot
 
@@ -69,6 +69,7 @@ system packages are upgraded and then reboot into the new kernel:
 
    ## openSUSE
    # zypper up
+   # zypper ar http://download.opensuse.org/repositories/Cloud:/OpenStack:/Pike/openSUSE_Leap_42.3 OBS:Cloud:OpenStack:Pike
    # zypper in git-core
    # reboot
 
@@ -190,7 +191,7 @@ following:
 
 .. code-block:: shell-session
 
-   # cd /opt/openstack-ansible/playbooks
+   # cd /opt/openstack-ansible/
    # cp etc/openstack_deploy/conf.d/{aodh,gnocchi,ceilometer}.yml.aio /etc/openstack_deploy/conf.d/
    # for f in $(ls -1 /etc/openstack_deploy/conf.d/*.aio); do mv -v ${f} ${f%.*}; done
 

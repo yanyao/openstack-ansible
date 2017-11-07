@@ -13,14 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ceilometer_service_user_name: ceilometer
-ceilometer_service_tenant_name: service
-
-# These are here rather than in ceilometer_all because
-# both the os_ceilometer and os_swift roles require them
-ceilometer_rabbitmq_userid: ceilometer
-ceilometer_rabbitmq_vhost: /ceilometer
-ceilometer_rabbitmq_port: "{{ rabbitmq_port }}"
-ceilometer_rabbitmq_use_ssl: "{{ rabbitmq_use_ssl }}"
-ceilometer_rabbitmq_servers: "{{ rabbitmq_servers }}"
-ceilometer_rabbitmq_host_group: "{{ rabbitmq_host_group }}"
+nova_virt_type: qemu

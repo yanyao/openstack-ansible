@@ -13,15 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-- include: common-playbooks/unbound-clients.yml
-  vars:
-    unbound_group: "haproxy"
-  when:
-    - resolvconf_enabled | bool
-
 - name: haproxy base config
   hosts: haproxy
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: "{{ osa_gather_facts | default(True) }}"
   user: root
   pre_tasks:
     - include: common-tasks/os-lxc-container-setup.yml
@@ -30,6 +24,10 @@
         log_dirs:
           - src: "/openstack/log/{{ inventory_hostname }}-haproxy"
             dest: "/var/log/haproxy"
+    - include: common-tasks/unbound-clients.yml
+      static: no
+      when:
+        - hostvars['localhost']['resolvconf_enabled'] | bool
   roles:
     - role: "keepalived"
       when: haproxy_use_keepalived | bool
@@ -44,7 +42,7 @@
 
 - name: Install haproxy
   hosts: haproxy
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: "{{ osa_gather_facts | default(True) }}"
   max_fail_percentage: 20
   user: root
   pre_tasks:

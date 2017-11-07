@@ -70,7 +70,7 @@ Installing additional services
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To install additional services, the files in
-``/etc/openstack_deploy/conf.d`` provide examples showing
+``etc/openstack_deploy/conf.d`` provide examples showing
 the correct host groups to use. To add another service, add the host group,
 allocate hosts to it, and then execute the playbooks.
 
@@ -183,8 +183,8 @@ values for the variables in each file that contains service credentials:
 
 .. code-block:: shell-session
 
-   # cd /opt/openstack-ansible/scripts
-   # python pw-token-gen.py --file /etc/openstack_deploy/user_secrets.yml
+   # cd /opt/openstack-ansible
+   # ./scripts/pw-token-gen.py --file /etc/openstack_deploy/user_secrets.yml
 
 To regenerate existing passwords, add the ``--regen`` flag.
 

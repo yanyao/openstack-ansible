@@ -34,11 +34,11 @@
           exit 0
         fi
       changed_when: "result.rc == 2"
-      failed_when: "{{ result.rc not in [0, 2] }}"
+      failed_when: "result.rc not in [0, 2]"
 
 - name: Basic host setup
   hosts: "{{ openstack_host_group|default('hosts') }}"
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: "{{ osa_gather_facts | default(True) }}"
   max_fail_percentage: 20
   user: root
   pre_tasks:

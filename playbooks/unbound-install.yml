@@ -16,7 +16,7 @@
 - name: Install unbound DNS resolvers
   hosts:
     - unbound
-  gather_facts: "{{ gather_facts | default(True) }}"
+  gather_facts: "{{ osa_gather_facts | default(True) }}"
   user: root
   pre_tasks:
     - include: common-tasks/os-log-dir-setup.yml
@@ -34,8 +34,14 @@
   vars:
     is_metal: "{{ properties.is_metal|default(false) }}"
 
-- include: common-playbooks/unbound-clients.yml
-  vars:
-    unbound_group: "{{ openstack_host_group|default('hosts') }}:{{ lxc_host_group | default('lxc_hosts') }}"
-  when:
-    - resolvconf_enabled | bool
+- name: Install unbound DNS resolver client configurations
+  hosts:
+    - "!unbound"
+    - "{{ openstack_host_group|default('hosts') }}"
+  user: root
+  tasks:
+    - include: common-tasks/unbound-clients.yml
+      static: no
+      when:
+        - hostvars['localhost']['resolvconf_enabled'] | bool
+  environment: "{{ deployment_environment_variables | default({}) }}"

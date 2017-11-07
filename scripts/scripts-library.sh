@@ -24,6 +24,8 @@ COMMAND_LOGS=${COMMAND_LOGS:-"/openstack/log/ansible_cmd_logs"}
 
 GATE_EXIT_LOG_COPY="${GATE_EXIT_LOG_COPY:-false}"
 GATE_EXIT_LOG_GZIP="${GATE_EXIT_LOG_GZIP:-true}"
+GATE_EXIT_RUN_ARA="${GATE_EXIT_RUN_ARA:-true}"
+GATE_EXIT_RUN_DSTAT="${GATE_EXIT_RUN_DSTAT:-true}"
 # If this is a gate node from OpenStack-Infra Store all logs into the
 #  execution directory after gate run.
 if [[ -d "/etc/nodepool" ]]; then
@@ -122,9 +124,17 @@ function exit_fail {
 }
 
 function gate_job_exit_tasks {
+  # This environment variable captures the exit code
+  # which was present when the trap was initiated.
+  # This would be the success/failure of the test.
+  export TEST_EXIT_CODE=$?
+
   # If this is a gate node from OpenStack-Infra Store all logs into the
   #  execution directory after gate run.
   if [ "$GATE_EXIT_LOG_COPY" == true ]; then
+    if [ "$GATE_EXIT_RUN_DSTAT" == true ]; then
+      generate_dstat_charts || true
+    fi
     GATE_LOG_DIR="${OSA_CLONE_DIR:-$(dirname $0)/..}/logs"
     mkdir -p "${GATE_LOG_DIR}/host" "${GATE_LOG_DIR}/openstack"
     rsync --archive --verbose --safe-links --ignore-errors /var/log/ "${GATE_LOG_DIR}/host" || true
@@ -132,11 +142,23 @@ function gate_job_exit_tasks {
     # Rename all files gathered to have a .txt suffix so that the compressed
     # files are viewable via a web browser in OpenStack-CI.
     # except tempest results testrepository.subunit and testr_results.html
-    find "${GATE_LOG_DIR}/" -type f -not -name "testrepository.subunit" -not -name "testr_results.html" -exec mv {} {}.txt \;
+    find "${GATE_LOG_DIR}/" -type f -not -name "testrepository.subunit" -not -name "testr_results.html" -not -name "dstat.html" -exec mv {} {}.txt \;
 
-    # Generate the ARA report
-    /opt/ansible-runtime/bin/ara generate html "${GATE_LOG_DIR}/ara" || true
-    /opt/ansible-runtime/bin/ara generate subunit "${GATE_LOG_DIR}/ara/testrepository.subunit" || true
+    # Generate the ARA report if enabled
+    if [ "$GATE_EXIT_RUN_ARA" == true ]; then
+      # In order to reduce the quantity of unnecessary log content
+      # being kept in OpenStack-Infra we only generate the ARA report
+      # when the test result is a failure.
+      if [[ "${TEST_EXIT_CODE}" != "0" ]]; then
+        echo "Generating ARA report due to non-zero exit code (${TEST_EXIT_CODE})."
+        /opt/ansible-runtime/bin/ara generate html "${GATE_LOG_DIR}/ara" || true
+      else
+        echo "Not generating ARA report due to test pass."
+      fi
+      # We still want the subunit report though, as that reflects
+      # success/failure in OpenStack Health
+      /opt/ansible-runtime/bin/ara generate subunit "${GATE_LOG_DIR}/ara/testrepository.subunit" || true
+    fi
     # Compress the files gathered so that they do not take up too much space.
     # We use 'command' to ensure that we're not executing with some sort of alias.
     if [ "$GATE_EXIT_LOG_GZIP" == true ]; then
@@ -146,6 +168,35 @@ function gate_job_exit_tasks {
     # OpenStack-CI jenkins user.
     chmod -R 0777 "${GATE_LOG_DIR}"
   fi
+}
+
+function run_dstat {
+  case ${DISTRO_ID} in
+    centos|rhel)
+        # Prefer dnf over yum for CentOS.
+        which dnf &>/dev/null && RHT_PKG_MGR='dnf' || RHT_PKG_MGR='yum'
+        $RHT_PKG_MGR -y install dstat
+        ;;
+    ubuntu)
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get -y install dstat
+        ;;
+    opensuse)
+        zypper -n install -l dstat
+        ;;
+  esac
+
+  dstat -tcmsdn --top-cpu --top-mem --top-bio --nocolor --output /openstack/log/instance-info/dstat.csv 3 > /openstack/log/instance-info/dstat.log&
+}
+
+function generate_dstat_charts {
+  kill $(pgrep dstat)
+  if [[ ! -d /opt/dstat_graph ]]; then
+    git clone https://github.com/Dabz/dstat_graph /opt/dstat_graph
+  fi
+  pushd /opt/dstat_graph
+    /usr/bin/env bash -e ./generate_page.sh /openstack/log/instance-info/dstat.csv >> /openstack/log/instance-info/dstat.html
+  popd
 }
 
 function print_info {

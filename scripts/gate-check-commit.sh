@@ -80,6 +80,10 @@ trap gate_job_exit_tasks EXIT
 # Log some data about the instance and the rest of the system
 log_instance_info
 
+if [ "$GATE_EXIT_RUN_DSTAT" == true ]; then
+  run_dstat
+fi
+
 # Get minimum disk size
 DATA_DISK_MIN_SIZE="$((1024**3 * $(awk '/bootstrap_host_data_disk_min_size/{print $2}' "${OSA_CLONE_DIR}/tests/roles/bootstrap-host/defaults/main.yml") ))"
 
@@ -91,30 +95,18 @@ if [ -n "${DATA_DISK_DEVICE}" ]; then
   export BOOTSTRAP_OPTS="${BOOTSTRAP_OPTS} bootstrap_host_data_disk_device=${DATA_DISK_DEVICE}"
 fi
 
-# Grab all the zuul environment variables that
-# were exported by the jenkins user into a file.
-# This is used for cross-repo testing.
-if [ -f zuul.env ]; then
-  # The ZUUL variables we get in the file are
-  # not quoted, so we change the file to ensure
-  # that they are. We also ensure that each
-  # var is exported so that it's accessible in
-  # any subshell.
-  sed -i 's|\(.*\)=\(.*\)$|export \1="\2"|' zuul.env
-  source zuul.env
-fi
-
 # Bootstrap Ansible
 source "${OSA_CLONE_DIR}/scripts/bootstrap-ansible.sh"
 
 # Install ARA and add it to the callback path provided by bootstrap-ansible.sh/openstack-ansible.rc
 # This is added *here* instead of bootstrap-ansible so it's used for CI purposes only.
-if [[ -d "/tmp/openstack/ara" ]]; then
+ARA_SRC_HOME="${HOME}/src/git.openstack.org/openstack/ara"
+if [[ -d "${ARA_SRC_HOME}" ]]; then
   # This installs from a git checkout
-  /opt/ansible-runtime/bin/pip install /tmp/openstack/ara
+  /opt/ansible-runtime/bin/pip install ${ARA_SRC_HOME} "${ANSIBLE_PACKAGE:-ansible}"
 else
   # This installs from pypi
-  /opt/ansible-runtime/bin/pip install ara
+  /opt/ansible-runtime/bin/pip install ara "${ANSIBLE_PACKAGE:-ansible}"
 fi
 # Dynamically retrieve the location of the ARA callback so we are able to find
 # it on both py2 and py3
@@ -153,9 +145,6 @@ pushd "${OSA_CLONE_DIR}/tests"
   fi
 popd
 
-# Implement the log directory
-mkdir -p /openstack/log
-
 pushd "${OSA_CLONE_DIR}/playbooks"
   # Disable Ansible color output
   export ANSIBLE_NOCOLOR=1
@@ -173,7 +162,7 @@ pushd "${OSA_CLONE_DIR}/playbooks"
 
   # Prepare the hosts
   export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-hosts.log"
-  openstack-ansible setup-hosts.yml -e gather_facts=False
+  openstack-ansible setup-hosts.yml -e osa_gather_facts=False
 
   # Log some data about the instance and the rest of the system
   log_instance_info
@@ -185,14 +174,14 @@ pushd "${OSA_CLONE_DIR}/playbooks"
 
   # Prepare the infrastructure
   export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-infrastructure.log"
-  openstack-ansible setup-infrastructure.yml -e gather_facts=False
+  openstack-ansible setup-infrastructure.yml -e osa_gather_facts=False
 
   # Log some data about the instance and the rest of the system
   log_instance_info
 
   # Setup OpenStack
   export ANSIBLE_LOG_PATH="${ANSIBLE_LOG_DIR}/setup-openstack.log"
-  openstack-ansible setup-openstack.yml -e gather_facts=False
+  openstack-ansible setup-openstack.yml -e osa_gather_facts=False
 
   # Log some data about the instance and the rest of the system
   log_instance_info
